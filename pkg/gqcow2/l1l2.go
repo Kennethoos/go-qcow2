@@ -93,7 +93,6 @@ func (i *Image) FindL2Entry(vdOffset uint64) (L2Entry, error) {
 	l2Index := (vdOffset / uint64(i.Header.ClusterSize())) % uint64(l2EntryCountPerTable)
 
 	l2TableStart := i.L1Table[l1Index].L2TableOffset
-	fmt.Printf("l1 table :%#v", i.L1Table[l1Index])
 
 	// read the l2 table
 	rawL2Table := make([]byte, i.Header.ClusterSize())
@@ -110,7 +109,7 @@ func extractL2Entry(block []byte, index uint64, cb uint32) L2Entry {
 	offset := index * 8
 
 	rawEntry := binary.BigEndian.Uint64(block[offset : offset+8])
-	fmt.Printf("rawentry: %#v", rawEntry)
+	// fmt.Printf("rawentry: %#v", rawEntry)
 
 	descriptorType := (rawEntry >> 62) & 1
 	flag := (rawEntry >> 63) & 1

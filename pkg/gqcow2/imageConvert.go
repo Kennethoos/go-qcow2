@@ -2,7 +2,7 @@ package gqcow2
 
 import (
 	"bytes"
-	"compress/zlib"
+	"compress/flate"
 	"errors"
 	"fmt"
 	"io"
@@ -56,33 +56,40 @@ func decompress(image *Image, virtualDisk *VirtualDisk, compressed GuestCluster)
 	totalSectors := compressed.L2Info.Compressed.AdditionalSectorCount + 1
 
 	compressedBuf := make([]byte, totalSectors*512)
-	_, err := image.Handler.ReadAt(compressedBuf, int64(compressed.L2Info.Compressed.DataOffset))
+	// compressedBuf may not be filled fully
+	rc, err := image.Handler.ReadAt(compressedBuf, int64(compressed.L2Info.Compressed.DataOffset))
 	if err != nil {
-		return errors.Join(ErrDecompressFail, err)
+		if err != io.EOF {
+			return errors.Join(ErrDecompressFail, err)
+		} else {
+			fmt.Printf("ts: %d\nstart:%d\nlength:%d\nimage_start:%d\nread_count: %d\n",
+				totalSectors, comVDStart, comVDLength, compressed.L2Info.Compressed.DataOffset,
+				rc)
+			compressedBuf = compressedBuf[0:rc]
+		}
 	}
 
-	fmt.Printf("ts: %d\nstart:%d\nlength:%d\nimage_start:%d\n", totalSectors, comVDStart, comVDLength, compressed.L2Info.Compressed.DataOffset)
-	fmt.Printf("header: %#v\n", compressedBuf[:2])
+	// fmt.Printf("ts: %d\nstart:%d\nlength:%d\nimage_start:%d\n", totalSectors, comVDStart, comVDLength, compressed.L2Info.Compressed.DataOffset)
+	// fmt.Printf("header: %#v\n", compressedBuf[:2])
 	// read and decompress
-	decompressor, err := zlib.NewReader(bytes.NewReader(compressedBuf))
-	if err != nil {
-		return err
-	}
+	// decompressor, err := zlib.NewReader(bytes.NewReader(compressedBuf))
+	decompressor := flate.NewReader(bytes.NewReader(compressedBuf))
 	defer decompressor.Close()
 
 	// we only need a cluster size of data, or the remaining length
 	// whichever the smallest.
-	decompressedBuf := make([]byte, comVDLength)
+	// decompressedBuf := make([]byte, comVDLength)
+	decompressedBuf := make([]byte, image.Header.ClusterSize())
 	n, err := decompressor.Read(decompressedBuf)
 	if err != nil {
-		return err
+		return errors.Join(ErrDecompressFail, err)
 	}
-	if n != int(comVDLength) {
-		return errors.Join(ErrDecompressFail, fmt.Errorf("decompressed less data, %d", n))
-	}
+	//if n != int(comVDLength) {
+	//	return errors.Join(ErrDecompressFail, fmt.Errorf("decompressed less data, %d", n))
+	//}
 	// Do something with the decompressed data
 	if _, err := virtualDisk.Handler.WriteAt(decompressedBuf[:n], int64(comVDStart)); err != nil {
-		return err
+		return errors.Join(ErrDecompressFail, err)
 	}
 
 	return nil
