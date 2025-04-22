@@ -3,40 +3,75 @@ package gqcow2
 import (
 	"fmt"
 	"io"
-	"os"
 )
 
-type File interface{}
+// FileHandler handles the read/write operation against
+// the image resource. No matter its local/remote
+// fs file, http served file, or other file system.
+type FileHandler interface {
+	io.ReaderAt
+	// io.WriterAt
+	// io.Closer
+
+	// FastHandler
+}
+
+// FastHandler tries to hook up the read, write file
+// descriptor
+type FastHandler interface {
+	// exposed linux file descriptor
+	Fd() uintptr
+}
 
 type Image struct {
-	Name          string
-	Input         io.ReaderAt
-	Ouput         io.WriterAt
+	// some resource may only support read
+	RWMode   bool
+	FastMode bool
+
+	// mostly for print
+	Name string
+
+	Handler FileHandler
+
+	// layout info
 	Header        *Header
 	RefCountTable []RefCountTableEntry
 	L1Table       []L1Entry
 }
 
-func NewFileImage(path string) (*Image, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
+func NewFileImage(f FileHandler, name string) (*Image, error) {
+	var err error
+	image := &Image{Name: name, Handler: f}
+
+	if _, ok := f.(io.WriterAt); ok {
+		image.RWMode = true
 	}
-	name := f.Name()
-	hdr, err := ParseHeader(f)
-	if err != nil {
+	if _, ok := f.(FastHandler); ok {
+		image.FastMode = true
+	}
+
+	if err = image.LoadHeader(); err != nil {
 		return nil, err
 	}
 
-	return &Image{
-		Name:   name,
-		Input:  f,
-		Header: hdr,
-	}, nil
+	if err = image.LoadRefcountTable(); err != nil {
+		return nil, err
+	}
+
+	if err = image.LoadL1Table(); err != nil {
+		return nil, err
+	}
+
+	return image, nil
 }
 
 func (i *Image) String() string {
-	return fmt.Sprintf("image:%s\nformat:qcow2\nversion:%d\nvirtual size: %d(bytes)\ncluster size: %d\n",
+	return fmt.Sprintf(`image:%s
+    format:qcow2
+    version:%d
+    virtual size: %d(bytes)
+    cluster size: %d
+    `,
 		i.Name,
 		i.Header.Version,
 		i.Header.Size,

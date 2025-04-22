@@ -3,6 +3,7 @@ package gqcow2
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 )
 
@@ -19,8 +20,8 @@ type L1Entry struct {
 
 type L2Entry struct {
 	// flase for cluster that are:
-	// unused, compressed or require COW
-	// true for standar clsuters whose refcount == 1
+	//  unused, compressed or require COW
+	// true for standard clusters whose refcount == 1
 	Flag bool
 
 	// only one may exist
@@ -28,6 +29,12 @@ type L2Entry struct {
 	Compressed *CompressedDescriptor
 }
 
+func (l2e L2Entry) Valid() bool {
+	// must be one of it
+	return l2e.Standard != nil || l2e.Compressed != nil
+}
+
+// LoadL1Table load the l1 table content from the Image.
 func (i *Image) LoadL1Table() error {
 	clusterSize := i.Header.ClusterSize()
 	offset := i.Header.L1TableOffset
@@ -36,7 +43,7 @@ func (i *Image) LoadL1Table() error {
 
 	tableBuf := make([]byte, totalTableSize)
 
-	rc, err := i.Input.ReadAt(tableBuf, int64(offset))
+	rc, err := i.Handler.ReadAt(tableBuf, int64(offset))
 	if err != nil {
 		return err
 	}
@@ -76,6 +83,7 @@ func (i *Image) LoadL1Table() error {
 	return nil
 }
 
+// FindL2Entry takes virtual disk's offset as input, and return provide the l2 table entry
 func (i *Image) FindL2Entry(vdOffset uint64) (L2Entry, error) {
 	// each L2 table entry take 64bits, 8bytes
 	// and each L2 table takes 1 cluster size
@@ -85,20 +93,24 @@ func (i *Image) FindL2Entry(vdOffset uint64) (L2Entry, error) {
 	l2Index := (vdOffset / uint64(i.Header.ClusterSize())) % uint64(l2EntryCountPerTable)
 
 	l2TableStart := i.L1Table[l1Index].L2TableOffset
+	fmt.Printf("l1 table :%#v", i.L1Table[l1Index])
 
 	// read the l2 table
 	rawL2Table := make([]byte, i.Header.ClusterSize())
-	if _, err := i.Input.ReadAt(rawL2Table, int64(l2TableStart)); err != nil {
-		return L2Entry{}, err
+	if _, err := i.Handler.ReadAt(rawL2Table, int64(l2TableStart)); err != nil {
+		return L2Entry{}, errors.Join(
+			fmt.Errorf("reading l2 entry failed, offset %d at image file", l2TableStart),
+			err)
 	}
 
-	return extractL2Entry(rawL2Table, l2Index, i.Header.ClusterBits)
+	return extractL2Entry(rawL2Table, l2Index, i.Header.ClusterBits), nil
 }
 
-func extractL2Entry(block []byte, index uint64, cb uint32) (L2Entry, error) {
+func extractL2Entry(block []byte, index uint64, cb uint32) L2Entry {
 	offset := index * 8
 
 	rawEntry := binary.BigEndian.Uint64(block[offset : offset+8])
+	fmt.Printf("rawentry: %#v", rawEntry)
 
 	descriptorType := (rawEntry >> 62) & 1
 	flag := (rawEntry >> 63) & 1
@@ -114,10 +126,12 @@ func extractL2Entry(block []byte, index uint64, cb uint32) (L2Entry, error) {
 	} else {
 		cd := &CompressedDescriptor{}
 		split := 62 - (cb - 8)
-		cd.DataOffset = rawEntry & ((1 << split) - 1)
-		cd.AdditionalSectorCount = int((rawEntry >> split) & (1 << (62 - split)))
+
+		cd.DataOffset = rawEntry & uint64((1<<split)-1)
+		// cd.AdditionalSectorCount = int((rawEntry >> split) & (1 << (62 - split)))
+		cd.AdditionalSectorCount = int((rawEntry >> split) & ((1 << (62 - split)) - 1))
 		entry.Compressed = cd
 	}
 
-	return entry, nil
+	return entry
 }

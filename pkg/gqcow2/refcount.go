@@ -34,7 +34,7 @@ func (i *Image) LoadRefcountTable() error {
 	totalEntryCount := totalTableSize / RefCountTableEntrySizeByte
 
 	tableBuf := make([]byte, totalTableSize)
-	rc, err := i.Input.ReadAt(tableBuf, int64(offset))
+	rc, err := i.Handler.ReadAt(tableBuf, int64(offset))
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func (i *Image) ReadRefCount(offset uint64) (int, error) {
 
 	// read the block
 	rawBlock := make([]byte, 0, i.Header.ClusterSize())
-	if _, err := i.Input.ReadAt(rawBlock, int64(blockOffset)); err != nil {
+	if _, err := i.Handler.ReadAt(rawBlock, int64(blockOffset)); err != nil {
 		return 0, err
 	}
 

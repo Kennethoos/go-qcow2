@@ -3,7 +3,6 @@ package gqcow2
 import (
 	"encoding/binary"
 	"errors"
-	"io"
 )
 
 const QCOW2MagicNumber = "QFI\xfb"
@@ -176,10 +175,10 @@ func (h *Header) RefCountBlockEntryCount() int {
 	return h.ClusterSize() * 8 / h.RefCountBit()
 }
 
-func ParseHeader(r io.ReaderAt) (*Header, error) {
+func ParseHeader(r FileHandler) (*Header, error) {
 	// get the first 104 bytes
-	hdr := make([]byte, 104)
-	if _, err := r.ReadAt(hdr, 0); err != nil {
+	hdr, err := readAt(r, 0, 104)
+	if err != nil {
 		return nil, err
 	}
 
@@ -207,10 +206,18 @@ func ParseHeader(r io.ReaderAt) (*Header, error) {
 	if h.Version != 2 && h.Version != 3 {
 		return nil, errors.New("invalid version")
 	}
-	// 1<<9 == 512, which is the smallest cluster size
+	// 1 << 9 == 512, which is the smallest cluster size
 	if h.ClusterBits < 9 {
 		return nil, errors.New("invalid cluster size")
 	}
 
 	return h, nil
+}
+
+func (i *Image) LoadHeader() error {
+	var err error
+	if i.Header, err = ParseHeader(i.Handler); err != nil {
+		return err
+	}
+	return nil
 }
