@@ -175,6 +175,12 @@ func (h *Header) RefCountBlockEntryCount() int {
 	return h.ClusterSize() * 8 / h.RefCountBit()
 }
 
+func (h *Header) L2EntryPerTable() int {
+	// each L2 table entry take 64bits, 8bytes
+	// and each L2 table takes 1 cluster size
+	return h.ClusterSize() / 8
+}
+
 func ParseHeader(r FileHandler) (*Header, error) {
 	// get the first 104 bytes
 	hdr, err := readAt(r, 0, 104)

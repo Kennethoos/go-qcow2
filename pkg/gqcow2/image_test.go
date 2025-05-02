@@ -15,6 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var path string = "../../test/cirros.img"
+
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
@@ -99,11 +101,79 @@ func Test_FindL2Entry(t *testing.T) {
 			//_, err = gqcow2.NewFileImage(f, "cirros")
 			require.NoError(t, err)
 
-			l2entry, err := image.FindL2Entry(0)
+			// l2entry, err := image.FindL2Entry(8266306)
+			// cur_offset := 65535
+			cur_offset := 8192000
+			l2entry, err := image.FindL2Entry(uint64(cur_offset))
 			require.NoError(t, err)
 
-			fmt.Printf("%#v\n", l2entry)
-			fmt.Printf("%#v\n", l2entry.Compressed)
+			start_offset := cur_offset - (cur_offset % image.Header.ClusterSize())
+			fmt.Printf("The cluster at (begining offset %d, cur_offset %d. %s\n",
+				start_offset,
+				cur_offset,
+				l2entry)
+		})
+}
+
+func Test_ConvertSingleGuestCluster(t *testing.T) {
+	t.Run("Convert single guest cluster",
+		func(t *testing.T) {
+			path := "../../test/cirros.img"
+
+			f, err := os.Open(path)
+			require.NoError(t, err)
+
+			image, err := gqcow2.NewFileImage(f, "cirros")
+			require.NoError(t, err)
+
+			cur_offset := uint64(8226306)
+			// cur_offset := uint64(8)
+			gc, err := image.ExtractGuestCluster(cur_offset)
+			require.NoError(t, err)
+
+			fmt.Printf("%s\n", &gc)
+			fmt.Printf("cluster data length %d\n", len(gc.Raw))
+
+			outputPath := "../../test/singleCluster.raw"
+			rawFile, err := os.OpenFile(outputPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o755)
+			require.NoError(t, err)
+			wc, err := rawFile.Write(gc.Raw)
+			require.NoError(t, err)
+			assert.Equal(t, len(gc.Raw), wc)
+		})
+}
+
+func Test_PrintL1L2Table(t *testing.T) {
+	t.Run("PrintL1L2Table",
+		func(t *testing.T) {
+			f, err := os.Open(path)
+			require.NoError(t, err)
+
+			image, err := gqcow2.NewFileImage(f, "cirros")
+			//_, err = gqcow2.NewFileImage(f, "cirros")
+			require.NoError(t, err)
+
+			// buf := bytes.NewBuffer()
+			// l1buf, err := json.Marshal(image.L1Table)
+			// require.NoError(t, err)
+
+			entries := make([]gqcow2.L2Entry, 0, image.Header.L2EntryPerTable())
+			for _, l1t := range image.L1Table {
+				if l1t.L2TableOffset != 0 && l1t.RefCountBit {
+					perTableEntries, err := image.ExtractL2Table(l1t.L2TableOffset)
+					require.NoError(t, err)
+
+					entries = append(entries, perTableEntries...)
+				}
+			}
+
+			output, err := os.OpenFile("../../test/output.json", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
+			require.NoError(t, err)
+
+			buf, err := json.Marshal(entries)
+			require.NoError(t, err)
+			fmt.Fprintf(output, "%s\n", buf)
+			// fmt.Printf("%#v\n", l2entry.Compressed)
 		})
 }
 

@@ -69,7 +69,16 @@ func (image *Image) DumpToClusterMap() (*ClusterMap, error) {
 			nrData = true // if compressed, then must have data
 			nrZero = false
 
-			gc := GuestCluster{L2Info: entry, Start: nrStart, Length: uint64(nrLength)}
+			gc := GuestCluster{
+				GuestClusterMeta: GuestClusterMeta{
+					L2Info: entry,
+					Start:  nrStart,
+					Cur:    offset,
+					End:    nrStart + uint64(nrLength),
+					Length: uint64(nrLength),
+				},
+			}
+
 			clusterMap.CompressedCluster = append(clusterMap.CompressedCluster, gc)
 
 		} else if entry.Standard != nil {

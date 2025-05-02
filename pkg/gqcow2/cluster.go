@@ -1,6 +1,9 @@
 package gqcow2
 
-import "io"
+import (
+	"fmt"
+	"io"
+)
 
 // There are cluster that stores metadata such as header
 // also there are data cluster
@@ -17,16 +20,97 @@ const (
 	Compressed
 )
 
-type GuestCluster struct {
+type GuestClusterMeta struct {
 	L2Info L2Entry
 
 	// the start offset of the whole disk
 	Start uint64
+	Cur   uint64
+	End   uint64
 	// the length of this cluster
 	// usually the cluster size defined in the
 	// qcow2 image, but could be less in case
 	// there is no enough data for one cluster
 	Length uint64
+}
+
+type GuestCluster struct {
+	GuestClusterMeta
+	// L2Info L2Entry
+
+	//// the start offset of the whole disk
+	//Start uint64
+	//End   uint64
+	//// the length of this cluster
+	//// usually the cluster size defined in the
+	//// qcow2 image, but could be less in case
+	//// there is no enough data for one cluster
+	//Length uint64
+	Raw []byte
+}
+
+func (gc *GuestCluster) String() string {
+	return fmt.Sprintf("The cluster at (start %d, cur_offset %d, end %d). %s\n",
+		gc.Start,
+		gc.Cur,
+		gc.End,
+		gc.L2Info)
+}
+
+// GetCluster extract a single cluster into buf for the given offset
+func (i *Image) ExtractGuestCluster(vdOffset uint64) (GuestCluster, error) {
+	gc := GuestCluster{}
+	gc.Start = vdOffset - (vdOffset % uint64(i.Header.ClusterSize()))
+	gc.Cur = vdOffset
+
+	end := gc.Start + uint64(i.Header.ClusterSize())
+	if end > i.Header.Size {
+		end = i.Header.Size
+	}
+
+	gc.End = end
+	gc.Length = end - gc.Start
+	err := i.extractL2EntryData(vdOffset, &gc)
+	if err != nil {
+		return gc, err
+	}
+
+	return gc, nil
+}
+
+func (i *Image) extractL2EntryData(vdOffset uint64, guestCluster *GuestCluster) error {
+	if guestCluster.Raw == nil {
+		guestCluster.Raw = make([]byte, guestCluster.Length)
+	}
+
+	l2entry, err := i.FindL2Entry(vdOffset)
+	if err != nil {
+		return err
+	}
+	guestCluster.L2Info = l2entry
+
+	if l2entry.Standard != nil {
+		if l2entry.Flag {
+			if l2entry.Standard.AllZero {
+				return nil
+			} else {
+				rc, err := i.Handler.ReadAt(guestCluster.Raw, int64(guestCluster.Length))
+				if err != nil {
+					return err
+				}
+				if rc < int(guestCluster.Length) {
+					return io.ErrUnexpectedEOF
+				}
+				return nil
+			}
+		}
+
+		// unused
+		return nil
+	}
+
+	// if compressed
+	return decompressGuestCluster(i, guestCluster)
 }
 
 type ClusterMap struct {

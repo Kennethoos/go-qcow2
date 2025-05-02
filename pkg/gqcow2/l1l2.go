@@ -34,6 +34,25 @@ func (l2e L2Entry) Valid() bool {
 	return l2e.Standard != nil || l2e.Compressed != nil
 }
 
+func (l2e L2Entry) String() string {
+	var str string
+	if l2e.Standard != nil {
+		if l2e.Flag {
+			str = fmt.Sprintf("entry (at image offset %d) is [standard] used. All zero(%t)",
+				l2e.Standard.DataOffset,
+				l2e.Standard.AllZero)
+		} else {
+			str = "entry is [standard], unused."
+		}
+	} else {
+		str = fmt.Sprintf("entry is [compressed]. offset at image %d, additional sector %d",
+			l2e.Compressed.DataOffset, l2e.Compressed.AdditionalSectorCount,
+		)
+	}
+
+	return str
+}
+
 // LoadL1Table load the l1 table content from the Image.
 func (i *Image) LoadL1Table() error {
 	clusterSize := i.Header.ClusterSize()
@@ -83,6 +102,25 @@ func (i *Image) LoadL1Table() error {
 	return nil
 }
 
+func (i *Image) ExtractL2Table(offset uint64) ([]L2Entry, error) {
+	l2EntryCountPerTable := i.Header.ClusterSize() / 8
+	wholeTable := make([]L2Entry, 0, l2EntryCountPerTable)
+
+	// read the l2 table
+	rawL2Table := make([]byte, i.Header.ClusterSize())
+	if _, err := i.Handler.ReadAt(rawL2Table, int64(offset)); err != nil {
+		return wholeTable, errors.Join(
+			fmt.Errorf("reading l2 entry failed, offset %d at image file", offset),
+			err)
+	}
+
+	for index := range l2EntryCountPerTable {
+		wholeTable = append(wholeTable, extractL2Entry(rawL2Table, uint64(index), i.Header.ClusterBits))
+	}
+
+	return wholeTable, nil
+}
+
 // FindL2Entry takes virtual disk's offset as input, and return provide the l2 table entry
 func (i *Image) FindL2Entry(vdOffset uint64) (L2Entry, error) {
 	// each L2 table entry take 64bits, 8bytes
@@ -109,7 +147,6 @@ func extractL2Entry(block []byte, index uint64, cb uint32) L2Entry {
 	offset := index * 8
 
 	rawEntry := binary.BigEndian.Uint64(block[offset : offset+8])
-	// fmt.Printf("rawentry: %#v", rawEntry)
 
 	descriptorType := (rawEntry >> 62) & 1
 	flag := (rawEntry >> 63) & 1
